@@ -4,7 +4,3 @@ plugins {
 }
 
 description = "The @Delegator annotation consumed by the delegation APT and KSP processors."
-
-publishedLibrary {
-    artifactId = "delegation-annotations"
-}

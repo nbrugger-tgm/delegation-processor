@@ -8,8 +8,7 @@ package eu.nitonfx.gradle
  */
 object BuildVersions {
     /**
-     * JDK used to *run* javac/kotlinc. Provisioned automatically via the foojay resolver
-     * if it is not installed locally.
+     * JDK used to *run* javac/kotlinc.
      */
     const val JAVA_TOOLCHAIN = 25
 

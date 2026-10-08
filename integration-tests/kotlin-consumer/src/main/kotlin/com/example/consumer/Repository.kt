@@ -22,9 +22,6 @@ interface Repository<T> {
 
 /**
  * Anchor requesting generation of `RepositoryDelegator` in this package.
- *
- * The anchor carries no behaviour; it only tells the processor where to put the generated
- * interface.
  */
 @Delegator(Repository::class)
 class GeneratedDelegators private constructor()

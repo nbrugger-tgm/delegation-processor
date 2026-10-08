@@ -11,26 +11,22 @@ java {
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    // Compile against the public API of the baseline JDK instead of the toolchain JDK,
-    // so artifacts stay usable on JDK 21+ even though they are built with a newer JDK.
     options.release = BuildVersions.JAVA_RELEASE
-    options.encoding = "UTF-8"
     options.compilerArgs.addAll(
         listOf(
+            // Every javac warning is an error. `-processing` drops "no processor claimed this
+            // annotation", `-serial` the missing-serialVersionUID noise. This also applies to the
+            // integration tests, so it proves the *generated* code compiles warning free.
             "-Xlint:all,-processing,-serial",
             "-Werror",
-            // Keep parameter names in the class files; useful for generated delegation code.
-            "-parameters",
         ),
     )
 }
 
 tasks.withType<Javadoc>().configureEach {
-    (options as StandardJavadocDocletOptions).apply {
-        encoding = "UTF-8"
-        addStringOption("Xdoclint:all,-missing", "-quiet")
-        links("https://docs.oracle.com/en/java/javase/${BuildVersions.JAVA_RELEASE}/docs/api/")
-    }
+    // -Xdoclint:all,-missing => validate syntax, HTML and @link/@snippet references, but do not
+    // demand a doc comment on every member. addStringOption emits "-<key> <value>", hence -quiet.
+    (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:all,-missing", "-quiet")
 }
 
 // Reproducible archives: identical inputs produce byte identical jars, which also makes

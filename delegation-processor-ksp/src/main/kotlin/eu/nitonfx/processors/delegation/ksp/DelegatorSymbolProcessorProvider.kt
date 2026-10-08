@@ -1,12 +1,11 @@
 package eu.nitonfx.processors.delegation.ksp
 
+import com.google.auto.service.AutoService
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
 import com.google.devtools.ksp.processing.SymbolProcessorProvider
 
 /**
- * Entry point registered via `META-INF/services`, instantiated by KSP once per compilation.
- *
  * Add the processor to a Kotlin project with:
  *
  * ```kotlin
@@ -14,12 +13,13 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
  *
  * dependencies {
  *     ksp("eu.nitonfx.processors:delegation-processor-ksp:<version>")
- *     implementation("eu.nitonfx.processors:delegation-processor-ksp:<version>")
+ *     implementation("eu.nitonfx.processors:delegation-annotations:<version>")
  * }
  * ```
  *
  * @see DelegatorSymbolProcessor
  */
+@AutoService(SymbolProcessorProvider::class)
 public class DelegatorSymbolProcessorProvider : SymbolProcessorProvider {
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
         DelegatorSymbolProcessor(

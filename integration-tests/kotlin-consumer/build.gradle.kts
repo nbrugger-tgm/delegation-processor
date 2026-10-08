@@ -18,6 +18,6 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":annotations"))
-    ksp(project(":ksp"))
+    ksp(project(":delegation-processor-ksp"))
+    compileOnly(project(":delegation-annotations"))
 }

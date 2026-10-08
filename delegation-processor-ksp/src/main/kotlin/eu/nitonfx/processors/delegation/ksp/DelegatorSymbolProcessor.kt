@@ -64,10 +64,6 @@ import com.squareup.kotlinpoet.ksp.writeTo
  * (`fun` with a default implementation, properties with accessors) are left to the interface, and
  * the `Any` members `equals`/`hashCode`/`toString` are skipped because Kotlin does not allow an
  * interface to implement them.
- *
- * Kotlin's built-in `by` delegation covers the common case of delegating a *class*; this processor
- * exists for the case where the delegation has to be expressed as a reusable *interface* that
- * implementors can mix in and selectively override.
  */
 internal class DelegatorSymbolProcessor(
     private val codeGenerator: CodeGenerator,

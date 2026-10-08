@@ -5,9 +5,9 @@ plugins {
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
 dependencies {
-    "testImplementation"(libs.findLibrary("junit-jupiter").orElseThrow())
-    "testImplementation"(libs.findLibrary("assertj").orElseThrow())
-    "testRuntimeOnly"(libs.findLibrary("junit-platform-launcher").orElseThrow())
+    testImplementation(libs.findLibrary("junit-jupiter").orElseThrow())
+    testImplementation(libs.findLibrary("assertj").orElseThrow())
+    testRuntimeOnly(libs.findLibrary("junit-platform-launcher").orElseThrow())
 }
 
 tasks.withType<Test>().configureEach {
@@ -24,6 +24,7 @@ tasks.withType<Test>().configureEach {
         events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStackTraces = true
+        showExceptions = true
         showCauses = true
     }
 }

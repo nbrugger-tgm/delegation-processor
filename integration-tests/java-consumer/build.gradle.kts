@@ -6,6 +6,6 @@ plugins {
 description = "End to end check that annotationProcessor(...) produces usable delegators."
 
 dependencies {
-    implementation(project(":annotations"))
-    annotationProcessor(project(":processor"))
+    compileOnly(project(":delegation-annotations"))
+    annotationProcessor(project(":delegation-processor"))
 }

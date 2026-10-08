@@ -34,7 +34,6 @@ class ClockDelegatorTest {
         val clock: Clock = Shifted(FixedClock("UTC", 1_000L), 500L)
 
         assertThat(clock.currentTimeMillis()).isEqualTo(1_500L)
-        // Not overridden, so still delegated verbatim.
         assertThat(clock.zoneId).isEqualTo("UTC")
     }
 }

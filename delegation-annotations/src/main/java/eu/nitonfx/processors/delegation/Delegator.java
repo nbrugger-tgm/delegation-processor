@@ -7,16 +7,14 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Requests generation of a <em>delegator interface</em> for the interface passed as {@link #value()}.
+ * Requests generation of a <em>delegator interface</em> for the interface passed as {@link #value()}
+ * or for the annotated type itself.
  *
- * <p>The annotated type is only an <em>anchor</em>: it tells the processor <em>where</em> (in which
- * package) the delegator should be generated. The annotated type itself is never modified, and it
- * does not have to implement {@link #value()}.
- *
- * <p>For {@code @Delegator(Greeter.class)} placed on a type in package {@code com.example}, where
- * {@code Greeter} is:
+ * <p>Omitting {@link #value()} targets the annotated type itself, which must then be an interface.
+ * Given the code:
  *
  * {@snippet lang = "java":
+ * @Delegator
  * public interface Greeter {
  *     String greet(String name);
  * }
@@ -39,37 +37,39 @@ import java.lang.annotation.Target;
  * to supplying a single delegate instance, while still allowing any individual method to be
  * overridden.
  *
- * <h2>Self delegation</h2>
+ * <p> Using {@code @Delegator} without a value on a class, record or enum is forbidden.
  *
- * <p>Omitting {@link #value()} targets the annotated type itself, which must then be an interface.
- * This is the common case of "give me a delegator for <em>this</em> interface":
+ * <h2>For 3rd party interfaces</h2>
+ *
+ * <p>If you do not have control over the interface you want to delegate,
+ * you can still generate a delegator for it by setting the {@link #value()}.</p>
+ *
+ * <p>In this case, the annotated type is only an <em>anchor</em>: it tells the processor <em>where</em> (in which
+ * package) the delegator should be generated. The annotated type itself is never modified, and it
+ * does not have to implement {@link #value()}.
+ *
+ * <p>For {@code @Delegator(Greeter.class)} placed on a type in package {@code com.example}, where
+ * {@code Greeter} is:
  *
  * {@snippet lang = "java":
- * @Delegator
  * public interface Greeter {
  *     String greet(String name);
  * }
  *}
+ * It generates the same {@code GreeterDelegator} as above, but next to the <em>anchor</em>, in
+ * {@code com.example}.
  *
- * <p>generates the same {@code GreeterDelegator} as above, next to {@code Greeter}. Using
- * {@code @Delegator} without a value on a class, record or enum is a compile error, since there is
- * no interface to delegate.
  *
  * <h2>Rules</h2>
  *
  * <ul>
- *   <li>{@link #value()} <strong>must</strong> be an interface; anything else is a compile error.
+ *   <li>{@link #value()} <strong>must</strong> be an interface;
  *       When omitted, the annotated type is used and must itself be an interface.
- *   <li>The annotation may be placed on a class, record, interface or enum.
+ *   <li>The annotation may be placed on a class, record, interface or enum if {@link #value()} is set
  *   <li>All inherited {@code abstract} methods are delegated. {@code default}, {@code static} and
- *       {@code private} interface methods are left alone, as are the {@link Object} methods
- *       ({@code equals}, {@code hashCode}, {@code toString}, ...), which cannot legally be given a
- *       {@code default} implementation.
+ *       {@code private} interface methods are left alone
  *   <li>Generic interfaces are supported: {@code @Delegator(Box.class)} for
  *       {@code interface Box<T>} generates {@code interface BoxDelegator<T> extends Box<T>}.
- *   <li>Annotating several types in the <em>same package</em> with the same {@link #value()}
- *       generates the delegator exactly once. Requesting the same generated {@link #name()} twice
- *       with a different configuration is a compile error.
  * </ul>
  *
  * <h2>Naming</h2>
@@ -87,20 +87,17 @@ import java.lang.annotation.Target;
  *
  * <p>generates {@code interface GreeterMixin extends Greeter} with the accessor
  * {@code Greeter delegate()}.
- *
- * @see <a href="https://github.com/nitonfx/delegation-processor">Project documentation</a>
  */
 @Documented
 @Target(ElementType.TYPE)
-@Retention(RetentionPolicy.RUNTIME)
+@Retention(RetentionPolicy.SOURCE)
 public @interface Delegator {
     /**
      * The interface to generate a delegator for.
      *
-     * <p>Defaults to {@link Self}, which means "the annotated type itself". Annotation members
-     * cannot be {@code null}, so {@link Self} acts as the absent marker.
+     * <p>Defaults to the annotated type.
      *
-     * @return the delegated interface; must be an interface type
+     * @return the interface to delegate
      */
     Class<?> value() default Self.class;
 
@@ -109,8 +106,7 @@ public @interface Delegator {
      *
      * <p>Defaults to the simple name of {@link #value()} suffixed with {@code Delegator}. The
      * generated type is always placed in the package of the annotated element, so this is a simple
-     * name, not a qualified one; supplying anything that is not a valid identifier is a compile
-     * error.
+     * name, not a qualified one;
      *
      * @return the generated interface name, or {@code ""} for the default
      */
@@ -121,10 +117,9 @@ public @interface Delegator {
      *
      * <p>Defaults to {@code get<X>Delegate} for Java and {@code <x>Delegate} for Kotlin, where
      * {@code X} is the simple name of {@link #value()}. The value is used verbatim: in Java it
-     * becomes a method name, in Kotlin a property name. Supplying anything that is not a valid
-     * identifier is a compile error.
+     * becomes a method name, in Kotlin a property name.
      *
-     * @return the delegate accessor name, or {@code ""} for the default
+     * @return the delegate accessor name
      */
     String accessor() default "";
 

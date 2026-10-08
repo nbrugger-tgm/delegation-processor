@@ -7,13 +7,10 @@ plugins {
     id("nitonfx.test-conventions")
     id("nitonfx.publish-conventions")
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.ksp)
 }
 
 description = "Kotlin Symbol Processor generating delegator interfaces for @Delegator."
-
-publishedLibrary {
-    artifactId = "delegation-processor-ksp"
-}
 
 kotlin {
     explicitApi()
@@ -25,16 +22,21 @@ kotlin {
 }
 
 dependencies {
-    // `api` so that a single `ksp(...)` + `implementation(...)` pair supplies @Delegator too.
-    api(project(":annotations"))
+    ksp(libs.auto.service.ksp)
+    compileOnly(libs.auto.service.annotations)
 
     implementation(libs.ksp.api)
     implementation(libs.kotlinpoet)
     implementation(libs.kotlinpoet.ksp)
 
+    // The processor matches @Delegator by qualified name only, so the annotation is needed
+    // just for compiling the test fixtures.
+    testImplementation(project(":delegation-annotations"))
     testImplementation(libs.kctfork.core)
     testImplementation(libs.kctfork.ksp)
+
 }
+
 
 // kotlin-compile-testing drives the Kotlin compiler in-process through its experimental API.
 tasks.named<KotlinJvmCompile>("compileTestKotlin") {
