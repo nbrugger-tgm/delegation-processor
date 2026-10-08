@@ -51,13 +51,25 @@ import java.lang.annotation.Target;
  *   <li>Generic interfaces are supported: {@code @Delegator(Box.class)} for
  *       {@code interface Box<T>} generates {@code interface BoxDelegator<T> extends Box<T>}.
  *   <li>Annotating several types in the <em>same package</em> with the same {@link #value()}
- *       generates the delegator exactly once.
+ *       generates the delegator exactly once. Requesting the same generated {@link #name()} twice
+ *       with a different configuration is a compile error.
  * </ul>
  *
  * <h2>Naming</h2>
  *
  * <p>Given an interface with simple name {@code X}, the generated interface is named
- * {@code XDelegator} and the abstract accessor it declares is named {@code getXDelegate()}.
+ * {@code XDelegator} and the abstract accessor it declares is named {@code getXDelegate()} (Java)
+ * or {@code val xDelegate} (Kotlin, which compiles to the same {@code getXDelegate()} method).
+ *
+ * <p>Both names can be overridden with {@link #name()} and {@link #accessor()}:
+ *
+ * {@snippet lang = "java":
+ * @Delegator(value = Greeter.class, name = "GreeterMixin", accessor = "delegate")
+ * public final class Anchors {}
+ *}
+ *
+ * <p>generates {@code interface GreeterMixin extends Greeter} with the accessor
+ * {@code Greeter delegate()}.
  *
  * @see <a href="https://github.com/nitonfx/delegation-processor">Project documentation</a>
  */
@@ -71,4 +83,28 @@ public @interface Delegator {
      * @return the delegated interface; must be an interface type
      */
     Class<?> value();
+
+    /**
+     * Simple name of the generated interface.
+     *
+     * <p>Defaults to the simple name of {@link #value()} suffixed with {@code Delegator}. The
+     * generated type is always placed in the package of the annotated element, so this is a simple
+     * name, not a qualified one; supplying anything that is not a valid identifier is a compile
+     * error.
+     *
+     * @return the generated interface name, or {@code ""} for the default
+     */
+    String name() default "";
+
+    /**
+     * Name of the abstract member that returns the delegate.
+     *
+     * <p>Defaults to {@code get<X>Delegate} for Java and {@code <x>Delegate} for Kotlin, where
+     * {@code X} is the simple name of {@link #value()}. The value is used verbatim: in Java it
+     * becomes a method name, in Kotlin a property name. Supplying anything that is not a valid
+     * identifier is a compile error.
+     *
+     * @return the delegate accessor name, or {@code ""} for the default
+     */
+    String accessor() default "";
 }

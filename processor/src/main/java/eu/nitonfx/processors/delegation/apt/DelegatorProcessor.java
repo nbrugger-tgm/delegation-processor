@@ -24,6 +24,7 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
+import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeKind;
@@ -34,7 +35,7 @@ import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,7 +65,9 @@ public final class DelegatorProcessor extends AbstractProcessor {
     private static final String DELEGATOR_SUFFIX = "Delegator";
     private static final String DELEGATE_ACCESSOR_PREFIX = "get";
     private static final String DELEGATE_ACCESSOR_SUFFIX = "Delegate";
-    private static final String ANNOTATION_VALUE = "value";
+    private static final String MEMBER_VALUE = "value";
+    private static final String MEMBER_NAME = "name";
+    private static final String MEMBER_ACCESSOR = "accessor";
 
     private Elements elements;
     private Types types;
@@ -72,8 +75,18 @@ public final class DelegatorProcessor extends AbstractProcessor {
     private Filer filer;
     private boolean verbose;
 
-    /** Fully qualified names already written in this compilation, to keep the {@link Filer} happy. */
-    private final Set<String> generated = new HashSet<>();
+    /**
+     * Configurations already written in this compilation, keyed by generated qualified name. Keeps
+     * the {@link Filer} happy when several anchors request the same delegator, and lets conflicting
+     * requests be reported instead of silently ignored.
+     */
+    private final Map<String, GeneratedDelegator> generated = new HashMap<>();
+
+    /** The resolved, defaults-applied form of a single {@code @Delegator} annotation. */
+    private record DelegatorConfig(TypeMirror delegate, String name, String accessor) {}
+
+    /** What was actually generated for a qualified name, used to detect conflicting requests. */
+    private record GeneratedDelegator(String delegate, String accessor) {}
 
     /** Creates a processor instance. Invoked reflectively by javac. */
     public DelegatorProcessor() {
@@ -122,11 +135,12 @@ public final class DelegatorProcessor extends AbstractProcessor {
             return;
         }
 
-        TypeMirror delegateType = readDelegateType(annotatedType);
-        if (delegateType == null) {
+        DelegatorConfig config = readConfig(annotatedType);
+        if (config == null) {
             return;
         }
 
+        TypeMirror delegateType = config.delegate();
         if (delegateType.getKind() != TypeKind.DECLARED) {
             error(annotatedType, "@Delegator value must be an interface, but was '%s'", delegateType);
             return;
@@ -143,48 +157,89 @@ public final class DelegatorProcessor extends AbstractProcessor {
             return;
         }
 
-        generateDelegator(annotatedType, delegate);
+        if (!config.name().isEmpty() && !isValidIdentifier(config.name())) {
+            error(annotatedType, "@Delegator name '%s' is not a valid Java identifier", config.name());
+            return;
+        }
+
+        if (!config.accessor().isEmpty() && !isValidIdentifier(config.accessor())) {
+            error(annotatedType, "@Delegator accessor '%s' is not a valid Java identifier", config.accessor());
+            return;
+        }
+
+        generateDelegator(annotatedType, delegate, config);
+    }
+
+    private static boolean isValidIdentifier(String candidate) {
+        return SourceVersion.isIdentifier(candidate) && !SourceVersion.isKeyword(candidate);
     }
 
     /**
-     * Reads the {@code value} member of the {@link Delegator} annotation as a {@link TypeMirror}.
+     * Reads the {@link Delegator} annotation off {@code annotatedType}.
      *
      * <p>{@code Delegator#value()} cannot be read reflectively, because the referenced class is not
      * loadable during compilation; the annotation mirror is inspected instead.
      *
-     * @return the delegate type, or {@code null} if it could not be determined (an error has been
+     * @return the configuration, or {@code null} if it could not be determined (an error has been
      *     reported in that case)
      */
-    private TypeMirror readDelegateType(TypeElement annotatedType) {
+    private DelegatorConfig readConfig(TypeElement annotatedType) {
         String annotationName = Delegator.class.getCanonicalName();
         for (AnnotationMirror mirror : elements.getAllAnnotationMirrors(annotatedType)) {
             TypeElement annotationElement = (TypeElement) mirror.getAnnotationType().asElement();
             if (!annotationElement.getQualifiedName().contentEquals(annotationName)) {
                 continue;
             }
+
+            TypeMirror delegate = null;
+            String name = "";
+            String accessor = "";
+
             for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> entry :
                     elements.getElementValuesWithDefaults(mirror).entrySet()) {
-                if (entry.getKey().getSimpleName().contentEquals(ANNOTATION_VALUE)
-                        && entry.getValue().getValue() instanceof TypeMirror typeMirror) {
-                    return typeMirror;
+                Name member = entry.getKey().getSimpleName();
+                Object value = entry.getValue().getValue();
+
+                if (member.contentEquals(MEMBER_VALUE) && value instanceof TypeMirror typeMirror) {
+                    delegate = typeMirror;
+                } else if (member.contentEquals(MEMBER_NAME) && value instanceof String string) {
+                    name = string.strip();
+                } else if (member.contentEquals(MEMBER_ACCESSOR) && value instanceof String string) {
+                    accessor = string.strip();
                 }
+            }
+
+            if (delegate != null) {
+                return new DelegatorConfig(delegate, name, accessor);
             }
         }
         error(annotatedType, "Could not read the 'value' member of @Delegator");
         return null;
     }
 
-    private void generateDelegator(TypeElement annotatedType, TypeElement delegate) {
+    private void generateDelegator(TypeElement annotatedType, TypeElement delegate, DelegatorConfig config) {
         String packageName = elements.getPackageOf(annotatedType).getQualifiedName().toString();
-        String simpleName = delegate.getSimpleName() + DELEGATOR_SUFFIX;
+        String simpleName = config.name().isEmpty() ? delegate.getSimpleName() + DELEGATOR_SUFFIX : config.name();
         String qualifiedName = packageName.isEmpty() ? simpleName : packageName + '.' + simpleName;
 
-        if (!generated.add(qualifiedName)) {
-            // Several anchors in the same package requested the same delegator; one file is enough.
+        String accessorName = config.accessor().isEmpty()
+                ? DELEGATE_ACCESSOR_PREFIX + delegate.getSimpleName() + DELEGATE_ACCESSOR_SUFFIX
+                : config.accessor();
+
+        GeneratedDelegator request = new GeneratedDelegator(delegate.getQualifiedName().toString(), accessorName);
+        GeneratedDelegator previous = generated.putIfAbsent(qualifiedName, request);
+        if (previous != null) {
+            if (!previous.equals(request)) {
+                error(
+                        annotatedType,
+                        "Conflicting @Delegator requests for '%s': already generated for '%s' with accessor '%s'",
+                        qualifiedName,
+                        previous.delegate(),
+                        previous.accessor());
+            }
+            // Otherwise several anchors requested the same delegator; one file is enough.
             return;
         }
-
-        String accessorName = DELEGATE_ACCESSOR_PREFIX + delegate.getSimpleName() + DELEGATE_ACCESSOR_SUFFIX;
 
         List<TypeVariableName> typeVariables =
                 delegate.getTypeParameters().stream().map(TypeVariableName::get).toList();

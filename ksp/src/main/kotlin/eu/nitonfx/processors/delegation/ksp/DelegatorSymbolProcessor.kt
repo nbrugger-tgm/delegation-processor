@@ -75,8 +75,18 @@ internal class DelegatorSymbolProcessor(
     private val verbose: Boolean,
 ) : SymbolProcessor {
 
-    /** Qualified names already generated, so repeated anchors in one package emit a single file. */
-    private val generated = mutableSetOf<String>()
+    /** Configurations already generated, keyed by qualified name. */
+    private val generated = mutableMapOf<String, GeneratedDelegator>()
+
+    /** What was generated for a qualified name, used to detect conflicting requests. */
+    private data class GeneratedDelegator(val delegate: String, val accessor: String)
+
+    /** The resolved form of a single `@Delegator` annotation. */
+    private data class DelegatorConfig(
+        val delegate: KSClassDeclaration,
+        val name: String,
+        val accessor: String,
+    )
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         val symbols = resolver.getSymbolsWithAnnotation(DELEGATOR_ANNOTATION).toList()
@@ -97,7 +107,8 @@ internal class DelegatorSymbolProcessor(
     }
 
     private fun generateFor(anchor: KSClassDeclaration) {
-        val delegate = resolveDelegate(anchor) ?: return
+        val config = readConfig(anchor) ?: return
+        val delegate = config.delegate
 
         if (delegate.classKind != ClassKind.INTERFACE) {
             logger.error(
@@ -108,14 +119,37 @@ internal class DelegatorSymbolProcessor(
             return
         }
 
+        if (config.name.isNotEmpty() && !config.name.isValidIdentifier()) {
+            logger.error("@Delegator name '${config.name}' is not a valid identifier", anchor)
+            return
+        }
+        if (config.accessor.isNotEmpty() && !config.accessor.isValidIdentifier()) {
+            logger.error("@Delegator accessor '${config.accessor}' is not a valid identifier", anchor)
+            return
+        }
+
         val packageName = anchor.packageName.asString()
         val delegateSimpleName = delegate.simpleName.asString()
-        val generatedName = delegateSimpleName + DELEGATOR_SUFFIX
+        val generatedName = config.name.ifEmpty { delegateSimpleName + DELEGATOR_SUFFIX }
         val qualifiedName = if (packageName.isEmpty()) generatedName else "$packageName.$generatedName"
 
-        if (!generated.add(qualifiedName)) return
+        val accessorName = config.accessor.ifEmpty {
+            delegateSimpleName.replaceFirstChar { it.lowercase() } + DELEGATE_SUFFIX
+        }
 
-        val accessorName = delegateSimpleName.replaceFirstChar { it.lowercase() } + DELEGATE_SUFFIX
+        val request = GeneratedDelegator(delegate.qualifiedName?.asString().orEmpty(), accessorName)
+        generated.putIfAbsent(qualifiedName, request)?.let { previous ->
+            if (previous != request) {
+                logger.error(
+                    "Conflicting @Delegator requests for '$qualifiedName': already generated for " +
+                        "'${previous.delegate}' with accessor '${previous.accessor}'",
+                    anchor,
+                )
+            }
+            // Otherwise several anchors requested the same delegator; one file is enough.
+            return
+        }
+
         val typeParameterResolver = delegate.typeParameters.toTypeParameterResolver()
         val delegateType = delegate.asSuperinterfaceType(typeParameterResolver)
 
@@ -160,11 +194,11 @@ internal class DelegatorSymbolProcessor(
     }
 
     /**
-     * Reads the `value` member of the `@Delegator` annotation.
+     * Reads the `@Delegator` annotation off [anchor].
      *
-     * The annotation is declared in Java as `Class<?> value()`, which KSP surfaces as a [KSType].
+     * `value` is declared in Java as `Class<?>`, which KSP surfaces as a [KSType].
      */
-    private fun resolveDelegate(anchor: KSClassDeclaration): KSClassDeclaration? {
+    private fun readConfig(anchor: KSClassDeclaration): DelegatorConfig? {
         val annotation: KSAnnotation? = anchor.annotations.firstOrNull {
             it.annotationType.resolve().declaration.qualifiedName?.asString() == DELEGATOR_ANNOTATION
         }
@@ -173,13 +207,20 @@ internal class DelegatorSymbolProcessor(
             return null
         }
 
-        val value = annotation.arguments.firstOrNull { it.name?.asString() == "value" }?.value
+        fun argument(name: String): Any? = annotation.arguments.firstOrNull { it.name?.asString() == name }?.value
+
+        val value = argument(MEMBER_VALUE)
         val declaration = (value as? KSType)?.declaration as? KSClassDeclaration
         if (declaration == null) {
             logger.error("Could not resolve the @Delegator value '$value' to a type", anchor)
             return null
         }
-        return declaration
+
+        return DelegatorConfig(
+            delegate = declaration,
+            name = (argument(MEMBER_NAME) as? String).orEmpty().trim(),
+            accessor = (argument(MEMBER_ACCESSOR) as? String).orEmpty().trim(),
+        )
     }
 
     private fun delegatingProperty(
@@ -299,5 +340,12 @@ internal class DelegatorSymbolProcessor(
         const val DELEGATOR_ANNOTATION = "eu.nitonfx.processors.delegation.Delegator"
         const val DELEGATOR_SUFFIX = "Delegator"
         const val DELEGATE_SUFFIX = "Delegate"
+        const val MEMBER_VALUE = "value"
+        const val MEMBER_NAME = "name"
+        const val MEMBER_ACCESSOR = "accessor"
+
+        private val IDENTIFIER = Regex("[A-Za-z_][A-Za-z0-9_]*")
+
+        fun String.isValidIdentifier(): Boolean = IDENTIFIER.matches(this)
     }
 }

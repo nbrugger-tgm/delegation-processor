@@ -168,6 +168,29 @@ For an interface with simple name `X`:
 The generated type always goes in the **package of the annotated anchor**, not of the delegated
 interface. This lets you generate a delegator for a third-party interface.
 
+Both names are overridable:
+
+```java
+@Delegator(value = Greeter.class, name = "GreeterMixin", accessor = "delegate")
+public final class Anchors {}
+```
+
+| Member | Default | Effect |
+|---|---|---|
+| `name` | `""` → `<X>Delegator` | simple name of the generated interface |
+| `accessor` | `""` → `get<X>Delegate` / `<x>Delegate` | name of the abstract delegate member, used verbatim |
+
+Notes:
+
+- `name` is a *simple* name; the package is always the anchor's. A value that is not a valid
+  identifier is a compile error.
+- `accessor` becomes a method name in Java and a property name in Kotlin, so a shared value such
+  as `"delegate"` yields `Greeter delegate()` and `val delegate: Greeter` respectively.
+- In Kotlin, an accessor that collides with a soft keyword (`delegate`, `value`, `field`, ...) is
+  emitted with backticks. That is a legal declaration and callers need not use backticks.
+- Two anchors requesting the same generated `name` with a *different* configuration is a compile
+  error rather than a silently dropped generation.
+
 ---
 
 ## Semantics
@@ -189,7 +212,7 @@ Other guarantees:
 - **Deterministic output.** Members are emitted in a stable sorted order, so the generated source
   is reproducible and build-cache friendly regardless of the order the compiler reports members in.
 - **Idempotent per package.** Several anchors in the same package requesting the same delegator
-  produce exactly one file.
+  produce exactly one file; conflicting requests for the same name are an error.
 - **Errors, not crashes.** A non-interface `value` is reported as a compile error pointing at the
   annotated element.
 
