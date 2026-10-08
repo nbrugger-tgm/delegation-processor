@@ -69,6 +69,9 @@ public final class DelegatorProcessor extends AbstractProcessor {
     private static final String MEMBER_NAME = "name";
     private static final String MEMBER_ACCESSOR = "accessor";
 
+    /** Qualified name of the marker standing in for an omitted {@code value}. */
+    private static final String SELF_SENTINEL = "eu.nitonfx.processors.delegation.Delegator.Self";
+
     private Elements elements;
     private Types types;
     private Messager messager;
@@ -140,20 +143,8 @@ public final class DelegatorProcessor extends AbstractProcessor {
             return;
         }
 
-        TypeMirror delegateType = config.delegate();
-        if (delegateType.getKind() != TypeKind.DECLARED) {
-            error(annotatedType, "@Delegator value must be an interface, but was '%s'", delegateType);
-            return;
-        }
-
-        Element delegateElement = types.asElement(delegateType);
-        if (!(delegateElement instanceof TypeElement delegate)) {
-            error(annotatedType, "Could not resolve the @Delegator value '%s' to a type", delegateType);
-            return;
-        }
-
-        if (delegate.getKind() != ElementKind.INTERFACE) {
-            error(annotatedType, "@Delegator value must be an interface, but '%s' is a %s", delegate.getQualifiedName(), delegate.getKind());
+        TypeElement delegate = resolveDelegate(annotatedType, config);
+        if (delegate == null) {
             return;
         }
 
@@ -168,6 +159,48 @@ public final class DelegatorProcessor extends AbstractProcessor {
         }
 
         generateDelegator(annotatedType, delegate, config);
+    }
+
+    /**
+     * Determines which interface to delegate.
+     *
+     * <p>An omitted {@code value} (represented by {@link Delegator.Self}) means "the annotated type
+     * itself", which is then required to be an interface.
+     *
+     * @return the delegated interface, or {@code null} if it could not be determined (an error has
+     *     been reported in that case)
+     */
+    private TypeElement resolveDelegate(TypeElement annotatedType, DelegatorConfig config) {
+        TypeMirror delegateType = config.delegate();
+
+        if (delegateType.getKind() != TypeKind.DECLARED) {
+            error(annotatedType, "@Delegator value must be an interface, but was '%s'", delegateType);
+            return null;
+        }
+
+        Element delegateElement = types.asElement(delegateType);
+        if (!(delegateElement instanceof TypeElement delegate)) {
+            error(annotatedType, "Could not resolve the @Delegator value '%s' to a type", delegateType);
+            return null;
+        }
+
+        if (delegate.getQualifiedName().contentEquals(SELF_SENTINEL)) {
+            if (annotatedType.getKind() != ElementKind.INTERFACE) {
+                error(
+                        annotatedType,
+                        "@Delegator without a value delegates the annotated type itself, so it must be placed on an interface, but '%s' is a %s",
+                        annotatedType.getQualifiedName(),
+                        annotatedType.getKind());
+                return null;
+            }
+            return annotatedType;
+        }
+
+        if (delegate.getKind() != ElementKind.INTERFACE) {
+            error(annotatedType, "@Delegator value must be an interface, but '%s' is a %s", delegate.getQualifiedName(), delegate.getKind());
+            return null;
+        }
+        return delegate;
     }
 
     private static boolean isValidIdentifier(String candidate) {

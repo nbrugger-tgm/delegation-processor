@@ -83,7 +83,8 @@ internal class DelegatorSymbolProcessor(
 
     /** The resolved form of a single `@Delegator` annotation. */
     private data class DelegatorConfig(
-        val delegate: KSClassDeclaration,
+        /** `null` when `value` was omitted, meaning "the annotated type itself". */
+        val delegate: KSClassDeclaration?,
         val name: String,
         val accessor: String,
     )
@@ -108,14 +109,22 @@ internal class DelegatorSymbolProcessor(
 
     private fun generateFor(anchor: KSClassDeclaration) {
         val config = readConfig(anchor) ?: return
-        val delegate = config.delegate
+        val delegate = config.delegate ?: anchor
 
         if (delegate.classKind != ClassKind.INTERFACE) {
-            logger.error(
-                "@Delegator value must be an interface, but ${delegate.qualifiedName?.asString()} " +
-                    "is a ${delegate.classKind}",
-                anchor,
-            )
+            if (config.delegate == null) {
+                logger.error(
+                    "@Delegator without a value delegates the annotated type itself, so it must be " +
+                        "placed on an interface, but ${anchor.qualifiedName?.asString()} is a ${anchor.classKind}",
+                    anchor,
+                )
+            } else {
+                logger.error(
+                    "@Delegator value must be an interface, but ${delegate.qualifiedName?.asString()} " +
+                        "is a ${delegate.classKind}",
+                    anchor,
+                )
+            }
             return
         }
 
@@ -196,7 +205,8 @@ internal class DelegatorSymbolProcessor(
     /**
      * Reads the `@Delegator` annotation off [anchor].
      *
-     * `value` is declared in Java as `Class<?>`, which KSP surfaces as a [KSType].
+     * `value` is declared in Java as `Class<?>`, which KSP surfaces as a [KSType]. An omitted
+     * value (the [SELF_SENTINEL] marker) is reported as a `null` delegate.
      */
     private fun readConfig(anchor: KSClassDeclaration): DelegatorConfig? {
         val annotation: KSAnnotation? = anchor.annotations.firstOrNull {
@@ -211,13 +221,16 @@ internal class DelegatorSymbolProcessor(
 
         val value = argument(MEMBER_VALUE)
         val declaration = (value as? KSType)?.declaration as? KSClassDeclaration
-        if (declaration == null) {
+        if (value != null && declaration == null) {
             logger.error("Could not resolve the @Delegator value '$value' to a type", anchor)
             return null
         }
 
+        val isSelf = declaration == null ||
+            declaration.qualifiedName?.asString() == SELF_SENTINEL
+
         return DelegatorConfig(
-            delegate = declaration,
+            delegate = declaration.takeUnless { isSelf },
             name = (argument(MEMBER_NAME) as? String).orEmpty().trim(),
             accessor = (argument(MEMBER_ACCESSOR) as? String).orEmpty().trim(),
         )
@@ -343,6 +356,9 @@ internal class DelegatorSymbolProcessor(
         const val MEMBER_VALUE = "value"
         const val MEMBER_NAME = "name"
         const val MEMBER_ACCESSOR = "accessor"
+
+        /** Qualified name of the marker standing in for an omitted `value`. */
+        const val SELF_SENTINEL = "eu.nitonfx.processors.delegation.Delegator.Self"
 
         private val IDENTIFIER = Regex("[A-Za-z_][A-Za-z0-9_]*")
 

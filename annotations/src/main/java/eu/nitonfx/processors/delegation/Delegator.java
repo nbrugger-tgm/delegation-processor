@@ -39,10 +39,27 @@ import java.lang.annotation.Target;
  * to supplying a single delegate instance, while still allowing any individual method to be
  * overridden.
  *
+ * <h2>Self delegation</h2>
+ *
+ * <p>Omitting {@link #value()} targets the annotated type itself, which must then be an interface.
+ * This is the common case of "give me a delegator for <em>this</em> interface":
+ *
+ * {@snippet lang = "java":
+ * @Delegator
+ * public interface Greeter {
+ *     String greet(String name);
+ * }
+ *}
+ *
+ * <p>generates the same {@code GreeterDelegator} as above, next to {@code Greeter}. Using
+ * {@code @Delegator} without a value on a class, record or enum is a compile error, since there is
+ * no interface to delegate.
+ *
  * <h2>Rules</h2>
  *
  * <ul>
  *   <li>{@link #value()} <strong>must</strong> be an interface; anything else is a compile error.
+ *       When omitted, the annotated type is used and must itself be an interface.
  *   <li>The annotation may be placed on a class, record, interface or enum.
  *   <li>All inherited {@code abstract} methods are delegated. {@code default}, {@code static} and
  *       {@code private} interface methods are left alone, as are the {@link Object} methods
@@ -80,9 +97,12 @@ public @interface Delegator {
     /**
      * The interface to generate a delegator for.
      *
+     * <p>Defaults to {@link Self}, which means "the annotated type itself". Annotation members
+     * cannot be {@code null}, so {@link Self} acts as the absent marker.
+     *
      * @return the delegated interface; must be an interface type
      */
-    Class<?> value();
+    Class<?> value() default Self.class;
 
     /**
      * Simple name of the generated interface.
@@ -107,4 +127,12 @@ public @interface Delegator {
      * @return the delegate accessor name, or {@code ""} for the default
      */
     String accessor() default "";
+
+    /**
+     * Sentinel for {@link #value()} meaning "the annotated type itself".
+     *
+     * <p>Never implement this; it exists only because annotation members cannot default to
+     * {@code null}.
+     */
+    interface Self {}
 }

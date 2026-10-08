@@ -51,7 +51,7 @@ public record CachingRepository(Repository<User> getRepositoryDelegate)
 
 ```kotlin
 dependencies {
-    implementation("eu.nitonfx.processors:delegation-processor:<version>")
+    compileOnly("eu.nitonfx.processors:delegation-processor:<version>")
     annotationProcessor("eu.nitonfx.processors:delegation-processor:<version>")
 }
 ```
@@ -95,24 +95,21 @@ plugins {
 }
 
 dependencies {
+    //why is the processor in the implementation scope and where are the annotations from
     implementation("eu.nitonfx.processors:delegation-processor-ksp:<version>")
     ksp("eu.nitonfx.processors:delegation-processor-ksp:<version>")
 }
 ```
 
-> **Why a separate `-ksp` artifact instead of one coordinate?**
-> Gradle picks variants using *attributes*, and KSP's `ksp` configuration requests exactly the same
-> attributes as `annotationProcessor` (`org.gradle.usage=java-runtime`,
-> `org.gradle.category=library`, `org.gradle.libraryelements=jar`). There is no attribute that
-> distinguishes the two, so a single coordinate cannot resolve to the APT jar for
-> `annotationProcessor(...)` and the KSP jar for `ksp(...)`. A suffixed artifact is the only
-> approach that works reliably across KSP versions and for non-Kotlin consumers.
 
 ---
 
 ## Usage
 
+The simplest form annotates the interface itself:
+
 ```java
+@Delegator
 public interface Repository<T> {
     Optional<T> findById(String id);
     List<T> findAll();
@@ -121,7 +118,13 @@ public interface Repository<T> {
 
     default boolean isEmpty() { return count() == 0; }
 }
+```
 
+Alternatively, pass an interface explicitly. The generated type then lands in the package of the
+**annotated anchor**, which lets you generate a delegator for a third-party interface you cannot
+annotate:
+
+```java
 // Anchor: tells the processor *where* to generate. Carries no behaviour.
 @Delegator(Repository.class)
 public final class GeneratedDelegators {
@@ -129,7 +132,7 @@ public final class GeneratedDelegators {
 }
 ```
 
-generates, in the **anchor's** package:
+Either way the result is:
 
 ```java
 public interface RepositoryDelegator<T> extends Repository<T> {
@@ -165,25 +168,28 @@ For an interface with simple name `X`:
 | Generated type | `XDelegator` | `XDelegator` |
 | Delegate accessor | `getXDelegate()` | `val xDelegate` (→ `getXDelegate()`) |
 
-The generated type always goes in the **package of the annotated anchor**, not of the delegated
-interface. This lets you generate a delegator for a third-party interface.
+The generated type always goes in the package of the annotated element.
 
 Both names are overridable:
 
 ```java
-@Delegator(value = Greeter.class, name = "GreeterMixin", accessor = "delegate")
-public final class Anchors {}
+@Delegator(name = "GreeterMixin", accessor = "delegate")
+public interface Greeter { ... }
 ```
 
 | Member | Default | Effect |
 |---|---|---|
+| `value` | the annotated type itself | the interface to delegate |
 | `name` | `""` → `<X>Delegator` | simple name of the generated interface |
 | `accessor` | `""` → `get<X>Delegate` / `<x>Delegate` | name of the abstract delegate member, used verbatim |
 
 Notes:
 
-- `name` is a *simple* name; the package is always the anchor's. A value that is not a valid
-  identifier is a compile error.
+- Omitting `value` requires the annotated type to be an interface; a bare `@Delegator` on a class,
+  record or enum is a compile error. (Annotation members cannot be `null`, so the "absent" default
+  is the marker type `Delegator.Self`.)
+- `name` is a *simple* name; the package is always the annotated element's. A value that is not a
+  valid identifier is a compile error.
 - `accessor` becomes a method name in Java and a property name in Kotlin, so a shared value such
   as `"delegate"` yields `Greeter delegate()` and `val delegate: Greeter` respectively.
 - In Kotlin, an accessor that collides with a soft keyword (`delegate`, `value`, `field`, ...) is
@@ -214,7 +220,7 @@ Other guarantees:
 - **Idempotent per package.** Several anchors in the same package requesting the same delegator
   produce exactly one file; conflicting requests for the same name are an error.
 - **Errors, not crashes.** A non-interface `value` is reported as a compile error pointing at the
-  annotated element.
+  annotated element, as is a bare `@Delegator` on something that is not an interface.
 
 ### Options
 
