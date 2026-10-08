@@ -9,37 +9,58 @@ wide interface to one accessor, while leaving every member individually overrida
 
 Two interchangeable implementations are published:
 
-| Artifact                                               | Toolchain                     | Generates |
-|--------------------------------------------------------|-------------------------------|-----------|
-| `eu.nitonfx.processors:delegation-annotations`           | –                             | –         |
-| `eu.nitonfx.processors:delegation-processor`             | `javac` annotation processing | Java      |
-| `eu.nitonfx.processors:delegation-processor-ksp`         | Kotlin Symbol Processing      | Kotlin    |
+| Artifact                                         | Toolchain                     | Generates |
+|--------------------------------------------------|-------------------------------|-----------|
+| `eu.nitonfx.processors:delegation-annotations`   | –                             | –         |
+| `eu.nitonfx.processors:delegation-processor`     | `javac` annotation processing | Java      |
+| `eu.nitonfx.processors:delegation-processor-ksp` | Kotlin Symbol Processing      | Kotlin    |
 
 ---
 
 ## Why
 
 Interface delegation by hand is mechanical, verbose, and silently rots when the delegated
-interface grows a new method. Java has no language support for it at all. Kotlin's `by` works on
-*classes*, but cannot express "a reusable interface that pre-wires the delegation and can be mixed
+interface grows a new method. Java has no language support for it at all. Kotlin's `by` works on *classes*, but cannot
+express "a reusable interface that pre-wires the delegation and can be mixed
 in" — which is what you need when several implementations should share the same forwarding
 behaviour and each override a different subset.
 
 ```java
 // Without
 public class CachingRepository implements Repository<User> {
+
     private final Repository<User> delegate;
-    @Override public Optional<User> findById(String id) { return delegate.findById(id); }
-    @Override public List<User> findAll()               { return delegate.findAll(); }
-    @Override public void save(User entity)             { delegate.save(entity); }
-    @Override public int count()                        { return delegate.count(); }
+
+    @Override
+    public Optional<User> findById(String id) {
+        return delegate.findById(id);
+    }
+
+    @Override
+    public List<User> findAll() {
+        return delegate.findAll();
+    }
+
+    @Override
+    public void save(User entity) {
+        delegate.save(entity);
+    }
+
+    @Override
+    public int count() {
+        return delegate.count();
+    }
     // ... and one more every time Repository grows
 }
 
 // With
 public record CachingRepository(Repository<User> getRepositoryDelegate)
-        implements RepositoryDelegator<User> {
-    @Override public List<User> findAll() { return cached(getRepositoryDelegate()::findAll); }
+    implements RepositoryDelegator<User> {
+
+    @Override
+    public List<User> findAll() {
+        return cached(getRepositoryDelegate()::findAll);
+    }
 }
 ```
 
@@ -47,44 +68,48 @@ public record CachingRepository(Repository<User> getRepositoryDelegate)
 
 ## Install
 
+`@Delegator` has `SOURCE` retention, so the annotation artifact is only ever needed at compile
+time (`compileOnly`) and never ends up on your runtime classpath.
+
 ### Java (annotation processing)
 
 ```kotlin
 dependencies {
-    compileOnly("eu.nitonfx.processors:delegation-processor:<version>")
+    compileOnly("eu.nitonfx.processors:delegation-annotations:<version>")
     annotationProcessor("eu.nitonfx.processors:delegation-processor:<version>")
 }
 ```
-
-The `delegation-processor` artifact exposes `delegation-annotations` as an `api` dependency, so the
-single coordinate above provides both `@Delegator` and the processor.
 
 <details>
 <summary>Maven</summary>
 
 ```xml
+
 <dependency>
-  <groupId>eu.nitonfx.processors</groupId>
-  <artifactId>delegation-annotations</artifactId>
-  <version>${delegation.version}</version>
+    <groupId>eu.nitonfx.processors</groupId>
+    <artifactId>delegation-annotations</artifactId>
+    <version>${delegation.version}</version>
+    <scope>provided</scope>
 </dependency>
 ```
 
 ```xml
+
 <plugin>
-  <groupId>org.apache.maven.plugins</groupId>
-  <artifactId>maven-compiler-plugin</artifactId>
-  <configuration>
-    <annotationProcessorPaths>
-      <path>
-        <groupId>eu.nitonfx.processors</groupId>
-        <artifactId>delegation-processor</artifactId>
-        <version>${delegation.version}</version>
-      </path>
-    </annotationProcessorPaths>
-  </configuration>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <configuration>
+        <annotationProcessorPaths>
+            <path>
+                <groupId>eu.nitonfx.processors</groupId>
+                <artifactId>delegation-processor</artifactId>
+                <version>${delegation.version}</version>
+            </path>
+        </annotationProcessorPaths>
+    </configuration>
 </plugin>
 ```
+
 </details>
 
 ### Kotlin (KSP)
@@ -95,12 +120,14 @@ plugins {
 }
 
 dependencies {
-    //why is the processor in the implementation scope and where are the annotations from
-    implementation("eu.nitonfx.processors:delegation-processor-ksp:<version>")
+    compileOnly("eu.nitonfx.processors:delegation-annotations:<version>")
     ksp("eu.nitonfx.processors:delegation-processor-ksp:<version>")
 }
 ```
 
+The processor belongs on `ksp(...)` only: it is a build-time tool, not a library you compile
+against. It matches `@Delegator` by qualified name, so it does not depend on the annotation
+artifact at all.
 
 ---
 
@@ -109,26 +136,34 @@ dependencies {
 The simplest form annotates the interface itself:
 
 ```java
+
 @Delegator
 public interface Repository<T> {
+
     Optional<T> findById(String id);
+
     List<T> findAll();
+
     void save(T entity);
+
     int count();
 
-    default boolean isEmpty() { return count() == 0; }
+    default boolean isEmpty() {
+        return count() == 0;
+    }
 }
 ```
 
-Alternatively, pass an interface explicitly. The generated type then lands in the package of the
-**annotated anchor**, which lets you generate a delegator for a third-party interface you cannot
-annotate:
+If you cannot annotate the interface (because its from a library for example), you can use the annotation on a separate
+type instead.
 
 ```java
 // Anchor: tells the processor *where* to generate. Carries no behaviour.
 @Delegator(Repository.class)
 public final class GeneratedDelegators {
-    private GeneratedDelegators() {}
+
+    private GeneratedDelegators() {
+    }
 }
 ```
 
@@ -136,12 +171,28 @@ Either way the result is:
 
 ```java
 public interface RepositoryDelegator<T> extends Repository<T> {
+
     Repository<T> getRepositoryDelegate();
 
-    @Override default int count()                     { return getRepositoryDelegate().count(); }
-    @Override default List<T> findAll()               { return getRepositoryDelegate().findAll(); }
-    @Override default Optional<T> findById(String id) { return getRepositoryDelegate().findById(id); }
-    @Override default void save(T entity)             { getRepositoryDelegate().save(entity); }
+    @Override
+    default int count() {
+        return getRepositoryDelegate().count();
+    }
+
+    @Override
+    default List<T> findAll() {
+        return getRepositoryDelegate().findAll();
+    }
+
+    @Override
+    default Optional<T> findById(String id) {
+        return getRepositoryDelegate().findById(id);
+    }
+
+    @Override
+    default void save(T entity) {
+        getRepositoryDelegate().save(entity);
+    }
 }
 ```
 
@@ -150,7 +201,7 @@ The Kotlin/KSP equivalent generates a property accessor instead, which compiles 
 
 ```kotlin
 public interface RepositoryDelegator<T> : Repository<T> {
-    public val repositoryDelegate: Repository<T>
+    val repositoryDelegate: Repository<T>
 
     override val size: Int
         get() = repositoryDelegate.size
@@ -163,9 +214,9 @@ public interface RepositoryDelegator<T> : Repository<T> {
 
 For an interface with simple name `X`:
 
-| | Java | Kotlin |
-|---|---|---|
-| Generated type | `XDelegator` | `XDelegator` |
+|                   | Java             | Kotlin                               |
+|-------------------|------------------|--------------------------------------|
+| Generated type    | `XDelegator`     | `XDelegator`                         |
 | Delegate accessor | `getXDelegate()` | `val xDelegate` (→ `getXDelegate()`) |
 
 The generated type always goes in the package of the annotated element.
@@ -173,59 +224,47 @@ The generated type always goes in the package of the annotated element.
 Both names are overridable:
 
 ```java
+
 @Delegator(name = "GreeterMixin", accessor = "delegate")
-public interface Greeter { ... }
+public interface Greeter { ...
+}
 ```
 
-| Member | Default | Effect |
-|---|---|---|
-| `value` | the annotated type itself | the interface to delegate |
-| `name` | `""` → `<X>Delegator` | simple name of the generated interface |
-| `accessor` | `""` → `get<X>Delegate` / `<x>Delegate` | name of the abstract delegate member, used verbatim |
+| Member     | Default                          | Effect                                              |
+|------------|----------------------------------|-----------------------------------------------------|
+| `value`    | the annotated type itself        | the interface to delegate                           |
+| `name`     | `<X>Delegator`                   | simple name of the generated interface              |
+| `accessor` | `get<X>Delegate` / `<x>Delegate` | name of the abstract delegate member, used verbatim |
 
 Notes:
 
-- Omitting `value` requires the annotated type to be an interface; a bare `@Delegator` on a class,
-  record or enum is a compile error. (Annotation members cannot be `null`, so the "absent" default
-  is the marker type `Delegator.Self`.)
-- `name` is a *simple* name; the package is always the annotated element's. A value that is not a
-  valid identifier is a compile error.
-- `accessor` becomes a method name in Java and a property name in Kotlin, so a shared value such
-  as `"delegate"` yields `Greeter delegate()` and `val delegate: Greeter` respectively.
-- In Kotlin, an accessor that collides with a soft keyword (`delegate`, `value`, `field`, ...) is
-  emitted with backticks. That is a legal declaration and callers need not use backticks.
-- Two anchors requesting the same generated `name` with a *different* configuration is a compile
-  error rather than a silently dropped generation.
+`accessor` becomes a method name in Java and a property name in Kotlin, so a shared value such
+as `"delegate"` yields `Greeter delegate()` and `val delegate: Greeter` respectively.
 
 ---
 
 ## Semantics
 
-| Member | Delegated? | Why |
-|---|---|---|
-| `abstract` methods | yes | the point of the processor |
-| `default` / `static` / `private` interface methods | no | they already have a body |
-| Kotlin members with a body or accessor | no | same |
-| Kotlin abstract `val` / `var` | yes | setters are delegated too |
-| `equals` / `hashCode` / `toString` | no | neither Java nor Kotlin permits an interface to implement them |
-| Inherited members | yes | collected across the whole superinterface hierarchy |
-| Diamond-inherited members | once | collapsed by erased signature |
-| Generic interfaces & methods | yes | type parameters are propagated |
-| `varargs`, `throws`, `suspend`, member extension functions | yes | preserved |
+What is delegated and what is not:
+
+| Member                                             | Delegated? | Why                                                 |
+|----------------------------------------------------|------------|-----------------------------------------------------|
+| `abstract` methods                                 | yes        | the point of the processor                          |
+| `default` / `static` / `private` interface methods | no         | they already have a body                            |
+| Kotlin members with a body or accessor             | no         | same                                                |
+| Kotlin abstract `val` / `var`                      | yes        | setters are delegated too                           |
+| Inherited members                                  | yes        | collected across the whole superinterface hierarchy |
+| Diamond-inherited members                          | once       | collapsed by erased signature                       |
+| Generic interfaces & methods                       | yes        | type parameters are propagated                      |
 
 Other guarantees:
 
-- **Deterministic output.** Members are emitted in a stable sorted order, so the generated source
-  is reproducible and build-cache friendly regardless of the order the compiler reports members in.
-- **Idempotent per package.** Several anchors in the same package requesting the same delegator
-  produce exactly one file; conflicting requests for the same name are an error.
-- **Errors, not crashes.** A non-interface `value` is reported as a compile error pointing at the
-  annotated element, as is a bare `@Delegator` on something that is not an interface.
+- **Deterministic output.** The generated source is reproducible and build-cache friendly.
 
 ### Options
 
-| Option | APT | KSP |
-|---|---|---|
+| Option                   | APT                         | KSP                                         |
+|--------------------------|-----------------------------|---------------------------------------------|
 | Log every generated type | `-Adelegation.verbose=true` | `ksp { arg("delegation.verbose", "true") }` |
 
 ### Limitations
@@ -238,8 +277,7 @@ Other guarantees:
 
 ## Building
 
-Requires nothing but a JDK to bootstrap the wrapper — the build provisions its own daemon JVM and
-toolchains.
+To build this project you need some JRE (not JDK) 11+
 
 ```bash
 ./gradlew build          # compile, test, assemble everything
@@ -256,32 +294,21 @@ Golden files for the KSP processor can be regenerated after an intentional chang
 ### Layout
 
 ```
-annotations/                      @Delegator                          → delegation-annotations
-processor/                        javac annotation processor          → delegation-processor
-ksp/                              Kotlin Symbol Processor             → delegation-processor-ksp
+delegation-annotations/           @Delegator
+delegation-processor/             javac annotation processor
+delegation-processor-ksp/         Kotlin Symbol Processor
 integration-tests/java-consumer   consumes via annotationProcessor(...)
 integration-tests/kotlin-consumer consumes via ksp(...)
 build-logic/                      Gradle convention plugins
 ```
 
-### Build setup
-
-- Gradle 9.8.1 with **daemon JVM provisioning** (`gradle/gradle-daemon-jvm.properties`) — the
-  correct JDK is downloaded automatically if missing.
-- **Java toolchain provisioning** via the foojay resolver; built with JDK 25, compiled with
-  `--release 21`, so consumers only need JDK 21+.
-- **Build cache** and **configuration cache** enabled, **parallel** execution, reproducible
-  archives.
-- Version catalog (`gradle/libs.versions.toml`) and convention plugins in `build-logic/`.
-- No incubating Gradle features are enabled.
-
 ### Testing
 
-| Layer | Tool | What it proves |
-|---|---|---|
-| `processor` | [compile-testing](https://github.com/google/compile-testing) + golden files | generated Java source matches exactly; misuse produces the right diagnostics |
-| `ksp` | [kotlin-compile-testing (kctfork)](https://github.com/ZacSweers/kotlin-compile-testing) + golden files | generated Kotlin source matches exactly **and compiles** (`withCompilation = true`) |
-| `integration-tests/*` | JUnit 5 | the generated code actually delegates at runtime, through a real Gradle `annotationProcessor(...)` / `ksp(...)` wiring |
+| Layer                 | Tool                                                                                                   | What is tested                                                                                                         |
+|-----------------------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `processor`           | [compile-testing](https://github.com/google/compile-testing) + golden files                            | generated Java source matches exactly; misuse produces the right diagnostics                                           |
+| `ksp`                 | [kotlin-compile-testing (kctfork)](https://github.com/ZacSweers/kotlin-compile-testing) + golden files | generated Kotlin source matches exactly **and compiles** (`withCompilation = true`)                                    |
+| `integration-tests/*` | JUnit 5                                                                                                | the generated code actually delegates at runtime, through a real Gradle `annotationProcessor(...)` / `ksp(...)` wiring |
 
 ---
 
