@@ -89,7 +89,7 @@ import java.lang.annotation.Target;
  * {@code Greeter delegate()}.
  */
 @Documented
-@Target(ElementType.TYPE)
+@Target({ElementType.TYPE, ElementType.PACKAGE})
 @Retention(RetentionPolicy.SOURCE)
 public @interface Delegator {
     /**

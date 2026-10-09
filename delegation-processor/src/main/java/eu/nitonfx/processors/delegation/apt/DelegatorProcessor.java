@@ -25,6 +25,7 @@ import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.Name;
+import javax.lang.model.element.QualifiedNameable;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeKind;
@@ -70,7 +71,7 @@ public final class DelegatorProcessor extends AbstractProcessor {
     private static final String MEMBER_ACCESSOR = "accessor";
 
     /** Qualified name of the marker standing in for an omitted {@code value}. */
-    private static final String SELF_SENTINEL = "eu.nitonfx.processors.delegation.Delegator.Self";
+    private static final String SELF_SENTINEL = Delegator.Self.class.getCanonicalName();
 
     private Elements elements;
     private Types types;
@@ -129,36 +130,36 @@ public final class DelegatorProcessor extends AbstractProcessor {
 
     private void processAnnotatedElement(Element element) {
         ElementKind kind = element.getKind();
-        if (!(element instanceof TypeElement annotatedType)
-                || !(kind == ElementKind.CLASS
+        if (!(kind == ElementKind.CLASS
                         || kind == ElementKind.RECORD
                         || kind == ElementKind.INTERFACE
-                        || kind == ElementKind.ENUM)) {
+                        || kind == ElementKind.ENUM
+                        || kind == ElementKind.PACKAGE)) {
             error(element, "@Delegator is only applicable to classes, records, interfaces and enums, but was applied to a %s", kind);
             return;
         }
 
-        DelegatorConfig config = readConfig(annotatedType);
+        DelegatorConfig config = readConfig(element);
         if (config == null) {
             return;
         }
 
-        TypeElement delegate = resolveDelegate(annotatedType, config);
+        TypeElement delegate = resolveDelegate(element, config);
         if (delegate == null) {
             return;
         }
 
         if (!config.name().isEmpty() && !isValidIdentifier(config.name())) {
-            error(annotatedType, "@Delegator name '%s' is not a valid Java identifier", config.name());
+            error(element, "@Delegator name '%s' is not a valid Java identifier", config.name());
             return;
         }
 
         if (!config.accessor().isEmpty() && !isValidIdentifier(config.accessor())) {
-            error(annotatedType, "@Delegator accessor '%s' is not a valid Java identifier", config.accessor());
+            error(element, "@Delegator accessor '%s' is not a valid Java identifier", config.accessor());
             return;
         }
 
-        generateDelegator(annotatedType, delegate, config);
+        generateDelegator(element, delegate, config);
     }
 
     /**
@@ -170,7 +171,7 @@ public final class DelegatorProcessor extends AbstractProcessor {
      * @return the delegated interface, or {@code null} if it could not be determined (an error has
      *     been reported in that case)
      */
-    private TypeElement resolveDelegate(TypeElement annotatedType, DelegatorConfig config) {
+    private TypeElement resolveDelegate(Element annotatedType, DelegatorConfig config) {
         TypeMirror delegateType = config.delegate();
 
         if (delegateType.getKind() != TypeKind.DECLARED) {
@@ -189,11 +190,11 @@ public final class DelegatorProcessor extends AbstractProcessor {
                 error(
                         annotatedType,
                         "@Delegator without a value delegates the annotated type itself, so it must be placed on an interface, but '%s' is a %s",
-                        annotatedType.getQualifiedName(),
+                        annotatedType instanceof TypeElement te ? te.getQualifiedName() : annotatedType.toString(),
                         annotatedType.getKind());
                 return null;
             }
-            return annotatedType;
+            return (TypeElement) annotatedType;
         }
 
         if (delegate.getKind() != ElementKind.INTERFACE) {
@@ -216,9 +217,9 @@ public final class DelegatorProcessor extends AbstractProcessor {
      * @return the configuration, or {@code null} if it could not be determined (an error has been
      *     reported in that case)
      */
-    private DelegatorConfig readConfig(TypeElement annotatedType) {
+    private DelegatorConfig readConfig(Element element) {
         String annotationName = Delegator.class.getCanonicalName();
-        for (AnnotationMirror mirror : elements.getAllAnnotationMirrors(annotatedType)) {
+        for (AnnotationMirror mirror : elements.getAllAnnotationMirrors(element)) {
             TypeElement annotationElement = (TypeElement) mirror.getAnnotationType().asElement();
             if (!annotationElement.getQualifiedName().contentEquals(annotationName)) {
                 continue;
@@ -246,11 +247,11 @@ public final class DelegatorProcessor extends AbstractProcessor {
                 return new DelegatorConfig(delegate, name, accessor);
             }
         }
-        error(annotatedType, "Could not read the 'value' member of @Delegator");
+        error(element, "Could not read the 'value' member of @Delegator");
         return null;
     }
 
-    private void generateDelegator(TypeElement annotatedType, TypeElement delegate, DelegatorConfig config) {
+    private void generateDelegator(Element annotatedType, TypeElement delegate, DelegatorConfig config) {
         String packageName = elements.getPackageOf(annotatedType).getQualifiedName().toString();
         String simpleName = config.name().isEmpty() ? delegate.getSimpleName() + DELEGATOR_SUFFIX : config.name();
         String qualifiedName = packageName.isEmpty() ? simpleName : packageName + '.' + simpleName;
@@ -308,8 +309,15 @@ public final class DelegatorProcessor extends AbstractProcessor {
         if (verbose) {
             messager.printMessage(
                     Diagnostic.Kind.NOTE,
-                    "Generated %s for @Delegator on %s".formatted(qualifiedName, annotatedType.getQualifiedName()));
+                    "Generated %s for @Delegator on %s".formatted(qualifiedName, readableName(annotatedType)));
         }
+    }
+
+    private static String readableName(Element element) {
+        return switch (element) {
+            case QualifiedNameable qualifiable -> qualifiable.getQualifiedName().toString();
+            default -> element.toString();
+        };
     }
 
     /**

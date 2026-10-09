@@ -62,6 +62,8 @@ internal object KspFixture {
 
     fun source(name: String, contents: String): SourceFile = SourceFile.kotlin(name, contents)
 
+    fun javaSource(name: String, contents: String): SourceFile = SourceFile.java(name, contents)
+
     /** Asserts that the generated source for [qualifiedName] matches its golden file. */
     fun assertGolden(run: KspRun, qualifiedName: String) {
         val actual = run.generated(qualifiedName)
