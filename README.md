@@ -2,10 +2,8 @@
 
 Compile-time generation of **delegator interfaces** for Java and Kotlin.
 
-Annotate a type with `@Delegator(SomeInterface.class)` and the processor generates
-`SomeInterfaceDelegator` — an interface that implements `SomeInterface` by forwarding every
-abstract member to a single delegate instance. Implementing the generated interface reduces a
-wide interface to one accessor, while leaving every member individually overridable.
+Allows generating java/kotlin compliant delegators (compared to solutions such as lombok.@Delegate) at compile time,
+so that the generated code can be used in IDEs and is compatible with all build tools.
 
 Two interchangeable implementations are published:
 
@@ -17,59 +15,110 @@ Two interchangeable implementations are published:
 
 ---
 
-## Why
+## Usage
 
-Interface delegation by hand is mechanical, verbose, and silently rots when the delegated
-interface grows a new method. Java has no language support for it at all. Kotlin's `by` works on *classes*, but cannot
-express "a reusable interface that pre-wires the delegation and can be mixed
-in" — which is what you need when several implementations should share the same forwarding
-behaviour and each override a different subset.
+Simply annotate the interface you want to delegate with `@Delegator`:
 
 ```java
-// Without
-public class CachingRepository implements Repository<User> {
+@Delegator
+public interface Repository<T> {
 
-    private final Repository<User> delegate;
+    Optional<T> findById(String id);
 
-    @Override
-    public Optional<User> findById(String id) {
-        return delegate.findById(id);
+    List<T> findAll();
+
+    void save(T entity);
+
+    int count();
+
+    default boolean isEmpty() {
+        return count() == 0;
     }
+}
+```
 
-    @Override
-    public List<User> findAll() {
-        return delegate.findAll();
-    }
+If you cannot annotate the interface (because its from a library for example), you can use the annotation on a separate
+type or `package-info.java` instead.
 
-    @Override
-    public void save(User entity) {
-        delegate.save(entity);
-    }
+```java
+// Anchor: tells the processor *where* to generate. Carries no behaviour.
+@Delegator(Repository.class)
+public final class GeneratedDelegators {
 
-    @Override
-    public int count() {
-        return delegate.count();
+    private GeneratedDelegators() {
     }
-    // ... and one more every time Repository grows
 }
 
-// With
-public record CachingRepository(Repository<User> getRepositoryDelegate)
-    implements RepositoryDelegator<User> {
+//package-info.java
+@Delegator(Repository.class)
+package eu.acme.helloworld;
+```
+
+Either way the result is:
+
+```java
+public interface RepositoryDelegator<T> extends Repository<T> {
+
+    Repository<T> getRepositoryDelegate();
 
     @Override
-    public List<User> findAll() {
-        return cached(getRepositoryDelegate()::findAll);
+    default int count() {
+        return getRepositoryDelegate().count();
     }
+
+    @Override
+    default List<T> findAll() {
+        return getRepositoryDelegate().findAll();
+    }
+
+    @Override
+    default Optional<T> findById(String id) {
+        return getRepositoryDelegate().findById(id);
+    }
+
+    @Override
+    default void save(T entity) {
+        getRepositoryDelegate().save(entity);
+    }
+}
+```
+
+The Kotlin/KSP equivalent generates a property accessor instead, which compiles to the same
+`getRepositoryDelegate()` JVM method:
+
+```kotlin
+public interface RepositoryDelegator<T> : Repository<T> {
+    val repositoryDelegate: Repository<T>
+
+    override val size: Int
+        get() = repositoryDelegate.size
+
+    override fun findAll(): List<T> = repositoryDelegate.findAll()
 }
 ```
 
 ---
 
-## Install
+## Why
 
-`@Delegator` has `SOURCE` retention, so the annotation artifact is only ever needed at compile
-time (`compileOnly`) and never ends up on your runtime classpath.
+Interface delegation by hand verbose and annoying but sometimes necessary. Java has no language support for it at all.
+Kotlin's `by` has several problems depending on what you want to do, for example
+- The field that "backs" the delegation is hidden and unmodifiable, you have no control over it
+- The field that "backs" the delegation is set at construction time and cannot be changed later so
+  ```
+  class WeatherFacade(private var delegate: WeatherService) : WeatherService by delegate {
+      fun setDelegate(newDelegate: WeatherService) {
+          delegate = newDelegate
+      }
+  }
+  ```
+  would not work as expected since `delegate` is not the field used for delegation but a copy of the value it had at construction time.
+- When debugging it is intransparent why a method is called on the delegate and not on the delegating class itself since there is no
+  method actually forwarding to the delegate, the compiler just generates a method that calls the delegate directly.
+
+---
+
+## Install
 
 ### Java (annotation processing)
 
@@ -130,85 +179,6 @@ against. It matches `@Delegator` by qualified name, so it does not depend on the
 artifact at all.
 
 ---
-
-## Usage
-
-The simplest form annotates the interface itself:
-
-```java
-
-@Delegator
-public interface Repository<T> {
-
-    Optional<T> findById(String id);
-
-    List<T> findAll();
-
-    void save(T entity);
-
-    int count();
-
-    default boolean isEmpty() {
-        return count() == 0;
-    }
-}
-```
-
-If you cannot annotate the interface (because its from a library for example), you can use the annotation on a separate
-type instead.
-
-```java
-// Anchor: tells the processor *where* to generate. Carries no behaviour.
-@Delegator(Repository.class)
-public final class GeneratedDelegators {
-
-    private GeneratedDelegators() {
-    }
-}
-```
-
-Either way the result is:
-
-```java
-public interface RepositoryDelegator<T> extends Repository<T> {
-
-    Repository<T> getRepositoryDelegate();
-
-    @Override
-    default int count() {
-        return getRepositoryDelegate().count();
-    }
-
-    @Override
-    default List<T> findAll() {
-        return getRepositoryDelegate().findAll();
-    }
-
-    @Override
-    default Optional<T> findById(String id) {
-        return getRepositoryDelegate().findById(id);
-    }
-
-    @Override
-    default void save(T entity) {
-        getRepositoryDelegate().save(entity);
-    }
-}
-```
-
-The Kotlin/KSP equivalent generates a property accessor instead, which compiles to the same
-`getRepositoryDelegate()` JVM method:
-
-```kotlin
-public interface RepositoryDelegator<T> : Repository<T> {
-    val repositoryDelegate: Repository<T>
-
-    override val size: Int
-        get() = repositoryDelegate.size
-
-    override fun findAll(): List<T> = repositoryDelegate.findAll()
-}
-```
 
 ### Naming
 
