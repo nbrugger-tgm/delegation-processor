@@ -32,10 +32,13 @@ import com.squareup.kotlinpoet.TypeVariableName
 import com.squareup.kotlinpoet.UNIT
 import com.squareup.kotlinpoet.ksp.TypeParameterResolver
 import com.squareup.kotlinpoet.ksp.toClassName
+import com.squareup.kotlinpoet.ksp.toKModifier
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.toTypeParameterResolver
 import com.squareup.kotlinpoet.ksp.toTypeVariableName
 import com.squareup.kotlinpoet.ksp.writeTo
+
+private val VISIBILITY_MODIFIERS = setOf(Modifier.PUBLIC, Modifier.INTERNAL, Modifier.PRIVATE, Modifier.PROTECTED)
 
 /**
  * Generates a Kotlin delegator interface for every `@Delegator` annotated declaration.
@@ -199,6 +202,7 @@ internal class DelegatorSymbolProcessor(
         val delegateType = delegate.asSuperinterfaceType(typeParameterResolver)
 
         val typeSpec = TypeSpec.interfaceBuilder(generatedName)
+            .addModifiers(delegate.modifiers.filter { VISIBILITY_MODIFIERS.contains(it) }.mapNotNull { it.toKModifier() })
             .addKdoc(
                 "Implements [%T] by forwarding every member to [%N].\n\n" +
                     "Generated from the `@Delegator` annotation; do not edit.",
