@@ -19,7 +19,11 @@ kotlin {
         allWarningsAsErrors = true
         freeCompilerArgs.add("-Xjdk-release=${BuildVersions.JAVA_RELEASE}")
     }
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
 }
+
 
 dependencies {
     ksp(libs.auto.service.ksp)
